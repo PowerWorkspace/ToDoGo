@@ -1,0 +1,370 @@
+import win.ui;
+import time;
+import win.reg;
+import win.util.tray;
+import win.ui.menu;
+/*DSG{{*/
+mainForm = win.form(text="定时提醒";right=251;bottom=348)
+mainForm.add(
+button2={cls="button";text="删除选中事件";left=12;top=316;right=237;bottom=336;z=2};
+button3={cls="button";text="添加";left=197;top=61;right=237;bottom=101;z=4};
+checkbox={cls="checkbox";text="周一";left=66;top=105;right=116;bottom=121;z=5};
+checkbox10={cls="checkbox";text="开机自启";left=169;top=19;right=241;bottom=34;z=21};
+checkbox11={cls="checkbox";text="重复";left=182;top=146;right=238;bottom=162;z=22};
+checkbox2={cls="checkbox";text="周二";left=124;top=105;right=174;bottom=121;z=6};
+checkbox3={cls="checkbox";text="周三";left=182;top=105;right=232;bottom=121;z=7};
+checkbox4={cls="checkbox";text="周四";left=8;top=125;right=58;bottom=141;z=8};
+checkbox5={cls="checkbox";text="周五";left=66;top=125;right=116;bottom=141;z=9};
+checkbox6={cls="checkbox";text="周六";left=124;top=125;right=174;bottom=141;z=10};
+checkbox7={cls="checkbox";text="周日";left=182;top=125;right=232;bottom=141;z=11};
+checkbox8={cls="checkbox";text="今天";left=8;top=105;right=58;bottom=121;z=12};
+checkbox9={cls="checkbox";text="指定日期";left=8;top=145;right=90;bottom=161;z=14};
+checklist={cls="checklist";left=12;top=194;right=237;bottom=314;edge=1;items={};z=13};
+combobox={cls="combobox";left=110;top=166;right=156;bottom=186;edge=1;items={};mode="dropdown";z=16};
+combobox2={cls="combobox";left=175;top=166;right=221;bottom=186;edge=1;items={};mode="dropdown";z=17};
+datetimepick={cls="datetimepick";left=11;top=166;right=101;bottom=186;edge=1;z=15};
+edit={cls="edit";left=8;top=62;right=196;bottom=102;edge=1;frame=1;multiline=1;z=3};
+groupbox={cls="groupbox";text="定时弹窗";left=3;top=7;right=245;bottom=342;edge=1;z=1};
+static10={cls="static";text="时";left=158;top=166;right=173;bottom=186;transparent=1;z=18};
+static11={cls="static";text="分";left=223;top=166;right=238;bottom=186;transparent=1;z=19};
+static12={cls="static";text="Time";left=10;top=38;right=239;bottom=60;center=1;font=LOGFONT(weight=700);transparent=1;z=20}
+)
+/*}}*/
+
+//========== 全局变量 ==========
+var events = {};        // 事件列表
+var alertQueue = {};    // 待弹窗队列
+var alerting = false;   // 是否正在弹窗
+var timerId = null;     // 定时器句柄
+var isExiting = false;  // 是否正在真正退出（区别于"隐藏到托盘"）
+
+var RUN_KEY = "HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run";
+var RUN_NAME = "ToDo定时提醒";
+var weekNames = {"周一";"周二";"周三";"周四";"周五";"周六";"周日"};
+
+//========== 工具函数 ==========
+
+// 判断 v 是否在数组 arr 中
+function inArray(arr, v){
+    for(i=1; #arr; 1){
+        if(arr[i] == v) return true;
+    }
+    return false;
+}
+
+// 星期数字(1=周一..7=周日)转为中文名称
+function joinWeekdays(weekdays){
+    var arr = {};
+    for(i=1; #weekdays; 1){
+        table.push(arr, weekNames[weekdays[i]]);
+    }
+    return string.join(arr, "、");
+}
+
+// 计算最近的下一次"指定星期几"的 hour:minute 时刻
+function nextWeekdayTime(weekdays, hour, minute){
+    var now = time();
+    var base = {year=now.year; month=now.month; day=now.day; hour=hour; minute=minute; second=0};
+    for(d=0; d<=7; d++){
+        var t = time(base);      // 每次构造新对象
+        t.addDays(d);            // 返回自身,并刷新 dayofweek 字段
+        var wd = t.dayofweek;    // 周一=1..周六=6,周日=0
+        if(wd == 0) wd = 7;      // 周日映射为7
+        if(inArray(weekdays, wd) && tonumber(t) > tonumber(now)) return t;
+    }
+    return time(base).addDays(7); // 兜底:7天后的同一时刻
+}
+
+// 今天(若该时刻已过则明天)的 hour:minute
+function todayTime(hour, minute){
+    var now = time();
+    var t = time({year=now.year; month=now.month; day=now.day; hour=hour; minute=minute; second=0});
+    t.addDays(0); // 刷新字段
+    if(tonumber(t) <= tonumber(now)) t.addDays(1);
+    return t;
+}
+
+// 指定日期(若该时刻已过则顺延一天)的 hour:minute
+function dateTime(hour, minute){
+    var d = mainForm.datetimepick.time; // datetimepick 当前选择的日期
+    var t = time({year=d.year; month=d.month; day=d.day; hour=hour; minute=minute; second=0});
+    t.addDays(0);
+    var now = time();
+    if(tonumber(t) <= tonumber(now)) t.addDays(1);
+    return t;
+}
+
+// 计算重复事件的下一次触发时间
+function nextTrigger(evt){
+    if(#evt.weekdays > 0){
+        return nextWeekdayTime(evt.weekdays, evt.hour, evt.minute);
+    }
+    return todayTime(evt.hour, evt.minute);
+}
+
+// 刷新列表显示：序号 | 时间 | 内容 | 周期/重复
+function refreshList(){
+    mainForm.checklist.clear();
+    for(i=1; #events; 1){
+        var evt = events[i];
+        var timeStr = "";
+        if(evt.nextTime != null){
+            timeStr = evt.nextTime.format("%m-%d %H:%M");
+        } else {
+            timeStr = "待处理";
+        }
+        var text = string.replace(evt.text, "[\r\n]+", " "); // 换行替换为空格,保持列表单行
+        mainForm.checklist.addItem(
+            string.format("%d", i) ++ ". " ++ timeStr ++ "  " ++ text ++ "  [" ++ evt.desc ++ "]"
+        );
+    }
+}
+
+// 按对象删除事件
+function removeEvent(evt){
+    for(i=1; #events; 1){
+        if(events[i] == evt){
+            table.remove(events, i);
+            return;
+        }
+    }
+}
+
+//========== 弹窗队列 ==========
+function enqueueAlert(evt){
+    table.push(alertQueue, evt);
+    if(!alerting) showNextAlert();
+}
+
+function showNextAlert(){
+    if(#alertQueue == 0){
+        alerting = false;
+        return;
+    }
+    alerting = true;
+    var evt = table.remove(alertQueue, 1);
+
+    var tanForm = win.loadForm("/dlg/tan.aardio");
+    tanForm.static3.text = evt.text;
+    tanForm.onResult = function(result){
+        if(result == "ok"){
+            // 知道了：本次不再提示
+            if(evt.repeat){
+                // 重复事件：安排下一次
+                evt.nextTime = nextTrigger(evt);
+            } else {
+                // 不重复：从列表移除
+                removeEvent(evt);
+            }
+        }
+        else if(result == "delay5"){
+            // 延迟5分钟再提示
+            evt.nextTime = time().addMinutes(5);
+        }
+        else if(result == "delay10"){
+            // 延迟10分钟再提示
+            evt.nextTime = time().addMinutes(10);
+        }
+        refreshList();
+        showNextAlert();
+    };
+    tanForm.show();
+}
+
+//========== 开机自启 ==========
+function setAutoStart(on){
+    var reg = win.reg(RUN_KEY);
+    if(on){
+        reg.setValue(RUN_NAME, '"' ++ io._exepath ++ '"');
+    } else {
+        if(reg.queryValue(RUN_NAME) != null) reg.delValue(RUN_NAME);
+    }
+}
+
+//========== 初始化控件 ==========
+// 小时 00-23
+var hours = {};
+for(i=0; 23; 1){
+    table.push(hours, string.format("%02d", i));
+}
+// 分钟 00-59
+var mins = {};
+for(i=0; 59; 1){
+    table.push(mins, string.format("%02d", i));
+}
+mainForm.combobox.items = hours;
+mainForm.combobox2.items = mins;
+mainForm.combobox.selIndex = 9;    // 默认 08 点
+mainForm.combobox2.selIndex = 1;   // 默认 00 分
+
+mainForm.datetimepick.time = time(); // 日期默认今天
+
+// 开机自启初始状态
+var reg0 = win.reg(RUN_KEY);
+if(reg0.queryValue(RUN_NAME) != null) mainForm.checkbox10.checked = true;
+
+// static12 显示当前时间
+mainForm.static12.text = "当前时间：" ++ time().format("%Y-%m-%d %H:%M:%S");
+
+//========== 事件处理 ==========
+// 添加事件
+mainForm.button3.oncommand = function(id,event){
+    var text = string.trim(mainForm.edit.text);
+    if(text == "" or text == "添加事件"){
+        win.msgbox("请输入事件内容", "提示");
+        return;
+    }
+    var hour = tonumber(mainForm.combobox.text);
+    var minute = tonumber(mainForm.combobox2.text);
+    if(hour == null or minute == null){
+        win.msgbox("请先选择小时和分钟", "提示");
+        return;
+    }
+
+    // 收集勾选的星期几
+    var weekdays = {};
+    if(mainForm.checkbox.checked) table.push(weekdays, 1);
+    if(mainForm.checkbox2.checked) table.push(weekdays, 2);
+    if(mainForm.checkbox3.checked) table.push(weekdays, 3);
+    if(mainForm.checkbox4.checked) table.push(weekdays, 4);
+    if(mainForm.checkbox5.checked) table.push(weekdays, 5);
+    if(mainForm.checkbox6.checked) table.push(weekdays, 6);
+    if(mainForm.checkbox7.checked) table.push(weekdays, 7);
+
+    var todayChecked = mainForm.checkbox8.checked;
+    var dateChecked = mainForm.checkbox9.checked;
+    var repeat = mainForm.checkbox11.checked;
+
+    var evt = {
+        text = text;
+        hour = hour;
+        minute = minute;
+        weekdays = weekdays;
+        repeat = repeat;
+        nextTime = null;
+        desc = "";
+    };
+
+    var desc = "";
+    if(#weekdays > 0){
+        // 周期：指定的星期几
+        var names = joinWeekdays(weekdays);
+        if(repeat){
+            desc = "每周" ++ names;
+        } else {
+            desc = names;
+        }
+        evt.nextTime = nextWeekdayTime(weekdays, hour, minute);
+    }
+    else if(todayChecked){
+        // 周期：今天
+        if(repeat){
+            desc = "每天";
+        } else {
+            desc = "今天";
+        }
+        evt.nextTime = todayTime(hour, minute);
+    }
+    else if(dateChecked){
+        // 周期：指定日期
+        if(repeat){
+            desc = "每天";
+        } else {
+            desc = "指定日期";
+        }
+        evt.nextTime = dateTime(hour, minute);
+    }
+    else {
+        // 默认按今天处理
+        if(repeat){
+            desc = "每天";
+        } else {
+            desc = "今天";
+        }
+        evt.nextTime = todayTime(hour, minute);
+    }
+    evt.desc = desc;
+
+    table.push(events, evt);
+    refreshList();
+    mainForm.edit.text = "";
+};
+
+// 删除选中事件
+mainForm.button2.oncommand = function(id,event){
+    var idx = mainForm.checklist.selIndex;
+    if(idx == 0 or idx == null){
+        win.msgbox("请先在列表中选中要删除的事件", "提示");
+        return;
+    }
+    table.remove(events, idx);
+    refreshList();
+};
+
+// 开机自启开关
+mainForm.checkbox10.oncommand = function(id,event){
+    setAutoStart(mainForm.checkbox10.checked);
+};
+
+//========== 定时器：每秒刷新时间 + 检查事件 ==========
+timerId = mainForm.setInterval(1000, function(){
+    var now = time();
+    mainForm.static12.text = "当前时间：" ++ now.format("%Y-%m-%d %H:%M:%S");
+    var nowStamp = tonumber(now);
+    for(i=#events; 1; -1){
+        var evt = events[i];
+        if(evt.nextTime != null && nowStamp >= tonumber(evt.nextTime)){
+            evt.nextTime = null;   // 先置空，防止同一事件重复触发
+            enqueueAlert(evt);
+        }
+    }
+});
+
+//========== 系统托盘：点关闭按钮最小化到托盘，不退出程序 ==========
+mainForm.tray = win.util.tray(mainForm);
+mainForm.tray.tip = "ToDo 定时提醒（双击恢复主窗口）";
+
+// 拦截右上角关闭按钮
+mainForm.onClose = function(){
+    if(isExiting){
+        // 托盘菜单选"退出"：真正结束程序
+        if(timerId) mainForm.clearInterval(timerId);
+        return true;
+    }
+    // 普通点 X：隐藏主窗口到托盘，定时继续
+    mainForm.show(false);
+    mainForm.tray.pop("程序已最小化到托盘，定时提醒继续运行。", "ToDo 定时提醒", 1, 3);
+    return false; // 返回非 null 非 true，阻止窗口销毁
+};
+
+// 托盘图标点击行为
+mainForm.onTrayMessage = {
+    [0x202/*_WM_LBUTTONUP*/] = function(wParam){
+        mainForm.show(true);
+        win.setForeground(mainForm.hwnd, true);
+    };
+    [0x203/*_WM_LBUTTONDBLCLK*/] = function(wParam){
+        mainForm.show(true);
+        win.setForeground(mainForm.hwnd, true);
+    };
+    [0x205/*_WM_RBUTTONUP*/] = function(wParam){
+        // 右键弹出菜单：显示主窗口 / 退出
+        win.setForeground(mainForm.hwnd, true); // 先前置，避免菜单不消失
+        mainForm.popmenu = win.ui.popmenu(mainForm);
+        mainForm.popmenu.add("显示主窗口", function(id){
+            mainForm.show(true);
+            win.setForeground(mainForm.hwnd, true);
+        });
+        mainForm.popmenu.add(); // 分隔线
+        mainForm.popmenu.add("退出", function(id){
+            isExiting = true;
+            mainForm.tray.delete();
+            mainForm.close(); // 触发 onClose，因 isExiting=true 而真正退出
+        });
+        mainForm.popmenu.popup();
+        mainForm.popmenu.close();
+    };
+};
+
+mainForm.show();
+return win.loopMessage();

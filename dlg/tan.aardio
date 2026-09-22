@@ -1,0 +1,32 @@
+import win.ui;
+/*DSG{{*/
+var winform = win.form(text="事件提醒";right=479;bottom=319;max=false;min=false;mode="popup";sysmenu=false;topmost=1)
+winform.add(
+button={cls="button";text="知道了";left=31;top=210;right=151;bottom=250;color=0xFF0000;font=LOGFONT(weight=700);z=3};
+button2={cls="button";text="延迟5分钟重复";left=161;top=210;right=301;bottom=250;color=0x008080;z=4};
+button3={cls="button";text="延迟10分钟重复";left=311;top=210;right=431;bottom=250;color=0x008080;z=5};
+plus={cls="plus";left=371;top=18;right=401;bottom=48;background="C:\Users\Power\Pictures\微信图片_2026-09-21_154925_495.jpg";edge=1;frame=1;z=6};
+static2={cls="static";text="事件名称：";left=40;top=70;right=112;bottom=95;color=0x0000FF;font=LOGFONT(h=-14);transparent=1;z=1};
+static3={cls="static";left=70;top=119;right=424;bottom=154;align="center";font=LOGFONT(h=-14);transparent=1;z=2}
+)
+/*}}*/
+
+// 已处理标志，防止重复回调
+var handled = false;
+function done(result){
+    if(handled) return;
+    handled = true;
+    winform.close();
+    if(winform.onResult) winform.onResult(result);
+}
+
+winform.button.oncommand = function(id,event){ done("ok"); };
+winform.button2.oncommand = function(id,event){ done("delay5"); };
+winform.button3.oncommand = function(id,event){ done("delay10"); };
+
+// 用户直接点右上角X关闭时，按"知道了"处理
+winform.onClose = function(){
+    done("ok");
+};
+
+return winform;
