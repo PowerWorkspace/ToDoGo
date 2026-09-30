@@ -1,8 +1,8 @@
 name: Sync Gitee to GitHub
-
 on:
-  repository_dispatch:
-    types: [gitee-push]
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 jobs:
   sync:
@@ -20,7 +20,6 @@ jobs:
         run: |
           git config --global user.email "sync-bot@users.noreply.github.com"
           git config --global user.name "sync-bot"
-
-          git clone --mirror git@gitee.com:PowerWorkspace/ToDoGo.git gitee-mirror
+          git clone --mirror git@gitee.com:powerclub/to-do-go.git gitee-mirror
           cd gitee-mirror
           git push --mirror git@github.com:PowerWorkspace/ToDoGo.git
