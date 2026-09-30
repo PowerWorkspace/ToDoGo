@@ -1,0 +1,26 @@
+name: Sync Gitee to GitHub
+
+on:
+  repository_dispatch:
+    types: [gitee-push]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.GITEE_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo "${{ secrets.GITEE_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Mirror Gitee repo to GitHub
+        run: |
+          git config --global user.email "sync-bot@users.noreply.github.com"
+          git config --global user.name "sync-bot"
+
+          git clone --mirror git@gitee.com:PowerWorkspace/ToDoGo.git gitee-mirror
+          cd gitee-mirror
+          git push --mirror git@github.com:PowerWorkspace/ToDoGo.git
